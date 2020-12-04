@@ -71,17 +71,42 @@ class ServerlessPlugin {
 
         await this.uploadZipToS3(newVendorZipName);
 
+        console.log('Bref: Setting environment variables.');
+
         let filePath = this.stripSlashes((this.deploymentPrefix || '') + '/vendors/' + newVendorZipName);
 
-        this.serverless.service.package.exclude.push('vendor/**');
+        console.log(this.serverless.service.package.exclude);
+        console.log(this.serverless.service.provider.environment);
+
+        let excludes = this.serverless.service.package.exclude;
+        if(excludes.indexOf('vendor/**') === -1) {
+            excludes[excludes.length] = 'vendor/**';
+        }
+
         this.serverless.service.provider.environment.BREF_DOWNLOAD_VENDOR = `s3://${this.bucketName}/${filePath}`;
-        this.serverless.service.provider.iamRoleStatements.push({
+
+        let iamRoleStatements = this.serverless.service.provider.iamRoleStatements;
+        const roleDetails = {
             'Effect': 'Allow',
             'Action': 's3:GetObject',
             'Resource': [
-                `${this.bucketName}/*`
+                `${this.bucketName}/vendors/*`
             ]
-        });
+        };
+
+        if(typeof iamRoleStatements !== 'undefined' && iamRoleStatements) {
+            if(iamRoleStatements.indexOf(roleDetails) === -1) {
+                iamRoleStatements[iamRoleStatements.length] = roleDetails;
+            }
+        } else {
+            this.serverless.service.provider.iamRoleStatements = [
+                roleDetails
+            ];
+        }
+
+        console.log(this.serverless.service.provider.environment);
+
+        console.log('Bref: Vendor separation done!');
     }
 
     async createZipFile() {
@@ -147,13 +172,17 @@ class ServerlessPlugin {
             Prefix: this.deploymentPrefix || ''
         })
 
+        console.log('Bref: Checking vendor file on bucket...');
+
         const preparedBucketObjects = bucketObjects.Contents.map(object => object.Key);
         console.log(preparedBucketObjects);
 
         if(preparedBucketObjects.indexOf(this.stripSlashes(this.deploymentPrefix + '/vendors/' + zipFile)) >= 0) {
-            console.log('Bref: Vendor file already exists. Not uploading again.');
+            console.log('Bref: Vendor file already exists on bucket. Not uploading again.');
             return;
         }
+
+        console.log('Bref: Vendor file not found. Uploading...')
 
         const readStream = this.fs.createReadStream(zipFile);
         const details = {
