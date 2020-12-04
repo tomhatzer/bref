@@ -11,7 +11,7 @@ $appRoot = getenv('LAMBDA_TASK_ROOT');
 
 if (getenv('BREF_DOWNLOAD_VENDOR')) {
     if(! file_exists('/tmp/vendor')) {
-        exec(sprintf('/opt/awscli/aws s3 cp s3://%s/%s /tmp/vendor.zip', getenv('BREF_VENDOR_BUCKET'), getenv('BREF_VENDOR_FILE')));
+        exec(sprintf('/opt/awscli/aws s3 cp %s /tmp/vendor.zip', getenv('BREF_DOWNLOAD_VENDOR')));
 
         exec('unzip /tmp/vendor.zip -d /tmp/vendor');
 

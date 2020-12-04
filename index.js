@@ -65,62 +65,76 @@ class ServerlessPlugin {
 
         this.fs.renameSync('vendor.zip', newVendorZipName);
 
-        this.uploadZipToS3(newVendorZipName).then(() => {
-            this.serverless.service.package.exclude.push('vendor/**');
-            this.serverless.service.provider.environment.BREF_DOWNLOAD_VENDOR = true;
-            this.serverless.service.provider.environment.BREF_VENDOR_BUCKET = this.serverless.provider.deploymentBucket.name;
-            this.serverless.service.provider.environment.BREF_VENDOR_FILE = this.serverless.provider.deploymentPrefix + '/' + newVendorZipName;
-        }).catch((err) => {
-            throw new Error(`Failed to upload vendor file "${newVendorZipName}" to s3 bucket: ${err.message}`);
-        });
+        await this.uploadZipToS3(newVendorZipName);
+
+        let filePath = this.stripSlashes((this.serverless.provider.deploymentPrefix || '') + '/' + newVendorZipName);
+
+        this.serverless.service.package.exclude.push('vendor/**');
+        this.serverless.service.provider.environment.BREF_DOWNLOAD_VENDOR = `s3://${this.serverless.provider.deploymentBucket.name}/${filePath}`;
     }
 
     async createZipFile() {
-        const admZip = require('adm-zip');
-        const zip = new admZip();
+        const filePath = 'vendor.zip';
 
-        zip.addLocalFolder('vendor/', '');
+        return await new Promise((resolve, reject) => {
+            const JSZip = require('jszip');
+            const zip = new JSZip();
 
-        zip.writeZip('vendor.zip');
+            zip
+                .folder('vendor/', '')
+                .generateNodeStream({type:'nodebuffer', streamFiles:true})
+                .pipe(this.fs.createWriteStream(filePath))
+                .on('finish', function () {
+                    resolve()
+                })
+                .on('error', reject);
+        })
+            .then(() => {
+                const crypto = require('crypto');
 
-        return await this.createHashFromFile('vendor.zip');
-    }
-
-    // Following code is from here: https://gist.github.com/GuillermoPena/9233069#gistcomment-3108307
-    createHashFromFile(filePath) {
-        const crypto = require('crypto');
-
-        return new Promise(resolve => {
-            const hash = crypto.createHash('sha256');
-            this.fs.createReadStream(filePath).on('data', data => hash.update(data)).on('end', () => resolve(hash.digest('hex')));
-        });
+                return new Promise(resolve => {
+                    const hash = crypto.createHash('sha256');
+                    this.fs.createReadStream(filePath).on('data', data => hash.update(data)).on('end', () => resolve(hash.digest('hex')));
+                });
+            })
+            .catch(err => {
+                throw new Error(`Failed to create zip file "${filePath}": ${err.message}`);
+            });
     }
 
     async uploadZipToS3(zipFile) {
-        const bucketObjects = await this.provider.request('S3', 'listObjectsV2', {
+        return await this.provider.request('S3', 'listObjectsV2', {
             Bucket: this.serverless.provider.deploymentBucket.name,
-            Prefix: this.serverless.provider.deploymentPrefix
-        });
+            Prefix: this.serverless.provider.deploymentPrefix || ''
+        })
+            .then(bucketObjects => {
+                return new Promise((resolve, reject) => {
+                    if(bucketObjects.indexOf(zipFile) >= 0) {
+                        return reject('Vendor file already exists.');
+                    }
 
-        if (bucketObjects.Contents.length === 0) {
-            return true;
-        }
+                    resolve();
+                })
+            })
+            .then(() => this.fs.createReadStream(zipFile))
+            .then(body => {
+                const details = {
+                    ACL: 'private',
+                    Body: body,
+                    Bucket: this.serverless.provider.deploymentBucket.name,
+                    ContentType: 'application/zip',
+                    Key: this.serverless.provider.deploymentPrefix + '/' + zipFile,
+                };
 
-        if(bucketObjects.indexOf(zipFile) >= 0) {
-            return true;
-        }
+                return this.provider.request('S3', 'putObject', details);
+            })
+            .catch(err => {
+                throw new Error(`Failed to upload vendor file "${zipFile}" to s3 bucket: ${err.message}`);
+            });
+    }
 
-        const body = this.fs.readFileSync(zipFile);
-
-        const details = {
-            ACL: 'private',
-            Body: body,
-            Bucket: this.serverless.provider.deploymentBucket,
-            ContentType: 'application/zip',
-            Key: zipFile,
-        };
-
-        return await this.provider.request('S3', 'putObject', details);
+    stripSlashes(filePath) {
+        return filePath.replace(/^\/+/g, '');
     }
 }
 
