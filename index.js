@@ -13,8 +13,8 @@ class ServerlessPlugin {
         this.provider = this.serverless.getProvider('aws');
 
         this.fs = require('fs');
-        const path = require('path');
-        const filename = path.resolve(__dirname, 'layers.json');
+        this.path = require('path');
+        const filename = this.path.resolve(__dirname, 'layers.json');
         const layers = JSON.parse(this.fs.readFileSync(filename));
 
         this.checkCompatibleRuntime();
@@ -41,6 +41,7 @@ class ServerlessPlugin {
 
         this.hooks = {
             'package:setupProviderConfiguration': this.createVendorZip.bind(this)
+            //'before:deploy:deploy': this.createVendorZip.bind(this)
         };
     }
 
@@ -60,22 +61,25 @@ class ServerlessPlugin {
             return;
         }
 
-        const vendorZipHash = this.createZipFile();
+        this.bucketName = await this.provider.getServerlessDeploymentBucketName();
+        this.deploymentPrefix = await this.provider.getDeploymentPrefix();
+
+        const vendorZipHash = await this.createZipFile();
         const newVendorZipName = vendorZipHash + '.zip';
 
         this.fs.renameSync('vendor.zip', newVendorZipName);
 
         await this.uploadZipToS3(newVendorZipName);
 
-        let filePath = this.stripSlashes((this.serverless.provider.deploymentPrefix || '') + '/' + newVendorZipName);
+        let filePath = this.stripSlashes((this.deploymentPrefix || '') + '/vendors/' + newVendorZipName);
 
         this.serverless.service.package.exclude.push('vendor/**');
-        this.serverless.service.provider.environment.BREF_DOWNLOAD_VENDOR = `s3://${this.serverless.provider.deploymentBucket.name}/${filePath}`;
+        this.serverless.service.provider.environment.BREF_DOWNLOAD_VENDOR = `s3://${this.bucketName}/${filePath}`;
         this.serverless.service.provider.iamRoleStatements.push({
             'Effect': 'Allow',
             'Action': 's3:GetObject',
             'Resource': [
-                `${this.serverless.provider.deploymentBucket.name}/*`
+                `${this.bucketName}/*`
             ]
         });
     }
@@ -84,25 +88,53 @@ class ServerlessPlugin {
         const filePath = 'vendor.zip';
 
         return await new Promise((resolve, reject) => {
-            const JSZip = require('../../../node_modules/jszip');
-            const zip = new JSZip();
+            const archiver = require(process.mainModule.path + '/../node_modules/archiver');
+            const output = this.fs.createWriteStream(filePath);
+            const archive = archiver('zip', {
+                zlib: { level: 9 } // Sets the compression level.
+            });
 
-            zip
-                .folder('vendor/', '')
-                .generateNodeStream({type:'nodebuffer', streamFiles:true})
-                .pipe(this.fs.createWriteStream(filePath))
-                .on('finish', function () {
-                    resolve()
-                })
-                .on('error', reject);
+            console.log(`Bref: Creating ${filePath} archive...`);
+
+            archive.pipe(output);
+            archive.directory('vendor/', false);
+            archive.finalize();
+
+            output.on('close', () => {
+                console.log(`Bref: Created ${filePath} with ${archive.pointer()} total bytes.`);
+                resolve();
+            });
+
+            output.on('end', () => {
+                console.log('Bref: Archiver data stream has been drained');
+            });
+
+            archive.on('warning', err => {
+                if (err.code === 'ENOENT') {
+                    // log warning
+                    console.warn('Bref: Archiver warning', err);
+                } else {
+                    // throw error
+                    console.error('Bref: Archiver warning', err);
+                    reject(err);
+                }
+            });
+
+            archive.on('error', err => {
+                console.error('Bref: Archiver error', err);
+                reject(err);
+            });
         })
             .then(() => {
                 const crypto = require('crypto');
 
                 return new Promise(resolve => {
-                    const hash = crypto.createHash('sha256');
+                    const hash = crypto.createHash('md5');
                     this.fs.createReadStream(filePath).on('data', data => hash.update(data)).on('end', () => resolve(hash.digest('hex')));
                 });
+            })
+            .then(hash => {
+                return hash;
             })
             .catch(err => {
                 throw new Error(`Failed to create zip file "${filePath}": ${err.message}`);
@@ -110,34 +142,29 @@ class ServerlessPlugin {
     }
 
     async uploadZipToS3(zipFile) {
-        return await this.provider.request('S3', 'listObjectsV2', {
-            Bucket: this.serverless.provider.deploymentBucket.name,
-            Prefix: this.serverless.provider.deploymentPrefix || ''
+        const bucketObjects = await this.provider.request('S3', 'listObjectsV2', {
+            Bucket: this.bucketName,
+            Prefix: this.deploymentPrefix || ''
         })
-            .then(bucketObjects => {
-                return new Promise((resolve, reject) => {
-                    if(bucketObjects.indexOf(zipFile) >= 0) {
-                        return reject('Vendor file already exists.');
-                    }
 
-                    resolve();
-                })
-            })
-            .then(() => this.fs.createReadStream(zipFile))
-            .then(body => {
-                const details = {
-                    ACL: 'private',
-                    Body: body,
-                    Bucket: this.serverless.provider.deploymentBucket.name,
-                    ContentType: 'application/zip',
-                    Key: this.stripSlashes(this.serverless.provider.deploymentPrefix + '/' + zipFile),
-                };
+        const preparedBucketObjects = bucketObjects.Contents.map(object => object.Key);
+        console.log(preparedBucketObjects);
 
-                return this.provider.request('S3', 'putObject', details);
-            })
-            .catch(err => {
-                throw new Error(`Failed to upload vendor file "${zipFile}" to s3 bucket: ${err.message}`);
-            });
+        if(preparedBucketObjects.indexOf(this.stripSlashes(this.deploymentPrefix + '/vendors/' + zipFile)) >= 0) {
+            console.log('Bref: Vendor file already exists. Not uploading again.');
+            return;
+        }
+
+        const readStream = this.fs.createReadStream(zipFile);
+        const details = {
+            ACL: 'private',
+            Body: readStream,
+            Bucket: this.bucketName,
+            ContentType: 'application/zip',
+            Key: this.stripSlashes(this.deploymentPrefix + '/vendors/' + zipFile),
+        };
+
+        return await this.provider.request('S3', 'putObject', details);
     }
 
     stripSlashes(filePath) {
