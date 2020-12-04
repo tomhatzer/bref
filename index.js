@@ -56,7 +56,7 @@ class ServerlessPlugin {
     }
 
     async createVendorZip() {
-        if(! this.serverless.service.provider.custom.separateVendor) {
+        if(! this.serverless.service.custom.separateVendor) {
             return;
         }
 
