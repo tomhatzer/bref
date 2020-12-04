@@ -75,13 +75,12 @@ class ServerlessPlugin {
 
         let filePath = this.stripSlashes((this.deploymentPrefix || '') + '/vendors/' + newVendorZipName);
 
-        console.log(this.serverless.service.package.exclude);
-        console.log(this.serverless.service.provider.environment);
-
         let excludes = this.serverless.service.package.exclude;
         if(excludes.indexOf('vendor/**') === -1) {
             excludes[excludes.length] = 'vendor/**';
         }
+
+        excludes[excludes.length] = newVendorZipName;
 
         this.serverless.service.provider.environment.BREF_DOWNLOAD_VENDOR = `s3://${this.bucketName}/${filePath}`;
 
