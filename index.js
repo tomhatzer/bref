@@ -40,7 +40,7 @@ class ServerlessPlugin {
         }
 
         this.hooks = {
-            'before:deploy:deploy': this.createVendorZip.bind(this)
+            'package:setupProviderConfiguration': this.createVendorZip.bind(this)
         };
     }
 
@@ -71,6 +71,13 @@ class ServerlessPlugin {
 
         this.serverless.service.package.exclude.push('vendor/**');
         this.serverless.service.provider.environment.BREF_DOWNLOAD_VENDOR = `s3://${this.serverless.provider.deploymentBucket.name}/${filePath}`;
+        this.serverless.service.provider.iamRoleStatements.push({
+            'Effect': 'Allow',
+            'Action': 's3:GetObject',
+            'Resource': [
+                `${this.serverless.provider.deploymentBucket.name}/*`
+            ]
+        });
     }
 
     async createZipFile() {
