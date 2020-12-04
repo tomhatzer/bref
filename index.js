@@ -84,7 +84,7 @@ class ServerlessPlugin {
         const filePath = 'vendor.zip';
 
         return await new Promise((resolve, reject) => {
-            const JSZip = require('jszip');
+            const JSZip = require('../../../node_modules/jszip');
             const zip = new JSZip();
 
             zip
