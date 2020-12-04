@@ -130,7 +130,7 @@ class ServerlessPlugin {
                     Body: body,
                     Bucket: this.serverless.provider.deploymentBucket.name,
                     ContentType: 'application/zip',
-                    Key: this.serverless.provider.deploymentPrefix + '/' + zipFile,
+                    Key: this.stripSlashes(this.serverless.provider.deploymentPrefix + '/' + zipFile),
                 };
 
                 return this.provider.request('S3', 'putObject', details);
