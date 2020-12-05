@@ -41,8 +41,8 @@ class ServerlessPlugin {
 
         this.hooks = {
             'package:setupProviderConfiguration': this.createVendorZip.bind(this),
+            'after:aws:deploy:deploy:createStack': this.uploadVendorZip.bind(this),
             'before:remove:remove': this.removeVendorArchives.bind(this)
-            //'before:deploy:deploy': this.createVendorZip.bind(this)
         };
     }
 
@@ -62,35 +62,37 @@ class ServerlessPlugin {
             return;
         }
 
-        this.bucketName = await this.provider.getServerlessDeploymentBucketName();
-        this.deploymentPrefix = await this.provider.getDeploymentPrefix();
-
         const vendorZipHash = await this.createZipFile();
-        const newVendorZipName = vendorZipHash + '.zip';
-
-        this.fs.renameSync('vendor.zip', newVendorZipName);
-
-        await this.uploadZipToS3(newVendorZipName);
-
-        console.log('Bref: Setting environment variables.');
-
-        let filePath = this.stripSlashes((this.deploymentPrefix || '') + '/vendors/' + newVendorZipName);
+        this.newVendorZipName = vendorZipHash + '.zip';
 
         let excludes = this.serverless.service.package.exclude;
         if(excludes.indexOf('vendor/**') === -1) {
             excludes[excludes.length] = 'vendor/**';
         }
 
-        excludes[excludes.length] = newVendorZipName;
-
-        this.serverless.service.provider.environment.BREF_DOWNLOAD_VENDOR = `s3://${this.bucketName}/${filePath}`;
+        excludes[excludes.length] = this.newVendorZipName;
 
         let iamRoleStatements = this.serverless.service.provider.iamRoleStatements;
         const roleDetails = {
             'Effect': 'Allow',
             'Action': 's3:GetObject',
             'Resource': [
-                `${this.bucketName}/vendors/*`
+                {
+                    "Fn::Join": [
+                        "",
+                        [
+                            "arn:",
+                            {
+                                "Ref": "AWS::Partition"
+                            },
+                            ":s3:::",
+                            {
+                                "Ref": "ServerlessDeploymentBucket"
+                            },
+                            "/vendors/*"
+                        ]
+                    ]
+                }
             ]
         };
 
@@ -104,29 +106,41 @@ class ServerlessPlugin {
             ];
         }
 
-        console.log(this.serverless.service.provider.environment);
+        console.log('Bref: Setting environment variables.');
 
-        console.log('Bref: Vendor separation done!');
+        this.serverless.service.provider.environment.BREF_DOWNLOAD_VENDOR = {
+            "Fn::Join": [
+                "",
+                [
+                    "s3://",
+                    {
+                        "Ref": "ServerlessDeploymentBucket"
+                    },
+                    "/vendors/",
+                    this.newVendorZipName
+                ]
+            ]
+        };
     }
 
     async createZipFile() {
-        const filePath = 'vendor.zip';
+        this.filePath = '.serverless/vendor.zip';
 
         return await new Promise((resolve, reject) => {
             const archiver = require(process.mainModule.path + '/../node_modules/archiver');
-            const output = this.fs.createWriteStream(filePath);
+            const output = this.fs.createWriteStream(this.filePath);
             const archive = archiver('zip', {
                 zlib: { level: 9 } // Sets the compression level.
             });
 
-            console.log(`Bref: Creating ${filePath} archive...`);
+            console.log(`Bref: Creating vendor.zip archive...`);
 
             archive.pipe(output);
             archive.directory('vendor/', false);
             archive.finalize();
 
             output.on('close', () => {
-                console.log(`Bref: Created ${filePath} with ${archive.pointer()} total bytes.`);
+                console.log(`Bref: Created vendor.zip with ${archive.pointer()} total bytes.`);
                 resolve();
             });
 
@@ -155,15 +169,26 @@ class ServerlessPlugin {
 
                 return new Promise(resolve => {
                     const hash = crypto.createHash('md5');
-                    this.fs.createReadStream(filePath).on('data', data => hash.update(data)).on('end', () => resolve(hash.digest('hex')));
+                    this.fs.createReadStream(this.filePath).on('data', data => hash.update(data)).on('end', () => resolve(hash.digest('hex')));
                 });
             })
             .then(hash => {
                 return hash;
             })
             .catch(err => {
-                throw new Error(`Failed to create zip file "${filePath}": ${err.message}`);
+                throw new Error(`Failed to create zip file vendor.zip: ${err.message}`);
             });
+    }
+
+    async uploadVendorZip() {
+        console.log('Bref: Fetching serverless bucket name.');
+        this.bucketName = await this.provider.getServerlessDeploymentBucketName();
+        console.log('Bref: Fetching serverless deployment prefix.');
+        this.deploymentPrefix = await this.provider.getDeploymentPrefix();
+
+        await this.uploadZipToS3(this.filePath);
+
+        console.log('Bref: Vendor separation done!');
     }
 
     async uploadZipToS3(zipFile) {
@@ -177,7 +202,7 @@ class ServerlessPlugin {
         const preparedBucketObjects = bucketObjects.Contents.map(object => object.Key);
         console.log(preparedBucketObjects);
 
-        if(preparedBucketObjects.indexOf(this.stripSlashes(this.deploymentPrefix + '/vendors/' + zipFile)) >= 0) {
+        if(preparedBucketObjects.indexOf(this.stripSlashes(this.deploymentPrefix + '/vendors/' + this.newVendorZipName)) >= 0) {
             console.log('Bref: Vendor file already exists on bucket. Not uploading again.');
             return;
         }
@@ -190,14 +215,14 @@ class ServerlessPlugin {
             Body: readStream,
             Bucket: this.bucketName,
             ContentType: 'application/zip',
-            Key: this.stripSlashes(this.deploymentPrefix + '/vendors/' + zipFile),
+            Key: this.stripSlashes(this.deploymentPrefix + '/vendors/' + this.newVendorZipName),
         };
 
         return await this.provider.request('S3', 'putObject', details);
     }
 
-    stripSlashes(filePath) {
-        return filePath.replace(/^\/+/g, '');
+    stripSlashes(path) {
+        return path.replace(/^\/+/g, '');
     }
 
     async removeVendorArchives() {
