@@ -11,6 +11,7 @@ class ServerlessPlugin {
         this.serverless = serverless;
         this.options = options;
         this.provider = this.serverless.getProvider('aws');
+        this.chalk = require(process.mainModule.path + '/../node_modules/chalk');
 
         this.fs = require('fs');
         this.path = require('path');
@@ -106,7 +107,7 @@ class ServerlessPlugin {
             ];
         }
 
-        console.log('Bref: Setting environment variables.');
+        this.consoleLog('Setting environment variables.');
 
         this.serverless.service.provider.environment.BREF_DOWNLOAD_VENDOR = {
             "Fn::Join": [
@@ -133,34 +134,34 @@ class ServerlessPlugin {
                 zlib: { level: 9 } // Sets the compression level.
             });
 
-            console.log(`Bref: Creating vendor.zip archive...`);
+            this.consoleLog(`Creating vendor.zip archive...`);
 
             archive.pipe(output);
             archive.directory('vendor/', false);
             archive.finalize();
 
             output.on('close', () => {
-                console.log(`Bref: Created vendor.zip with ${archive.pointer()} total bytes.`);
+                this.consoleLog(`Created vendor.zip with ${archive.pointer()} total bytes.`);
                 resolve();
             });
 
             output.on('end', () => {
-                console.log('Bref: Archiver data stream has been drained');
+                this.consoleLog('Archiver data stream has been drained');
             });
 
             archive.on('warning', err => {
                 if (err.code === 'ENOENT') {
                     // log warning
-                    console.warn('Bref: Archiver warning', err);
+                    console.warn('Archiver warning', err);
                 } else {
                     // throw error
-                    console.error('Bref: Archiver warning', err);
+                    console.error('Archiver warning', err);
                     reject(err);
                 }
             });
 
             archive.on('error', err => {
-                console.error('Bref: Archiver error', err);
+                console.error('Archiver error', err);
                 reject(err);
             });
         })
@@ -181,14 +182,14 @@ class ServerlessPlugin {
     }
 
     async uploadVendorZip() {
-        console.log('Bref: Fetching serverless bucket name.');
+        this.consoleLog('Fetching serverless bucket name.');
         this.bucketName = await this.provider.getServerlessDeploymentBucketName();
-        console.log('Bref: Fetching serverless deployment prefix.');
+        this.consoleLog('Fetching serverless deployment prefix.');
         this.deploymentPrefix = await this.provider.getDeploymentPrefix();
 
         await this.uploadZipToS3(this.filePath);
 
-        console.log('Bref: Vendor separation done!');
+        this.consoleLog('Vendor separation done!');
     }
 
     async uploadZipToS3(zipFile) {
@@ -197,17 +198,16 @@ class ServerlessPlugin {
             Prefix: this.deploymentPrefix || ''
         })
 
-        console.log('Bref: Checking vendor file on bucket...');
+        this.consoleLog('Checking vendor file on bucket...');
 
         const preparedBucketObjects = bucketObjects.Contents.map(object => object.Key);
-        console.log(preparedBucketObjects);
 
         if(preparedBucketObjects.indexOf(this.stripSlashes(this.deploymentPrefix + '/vendors/' + this.newVendorZipName)) >= 0) {
-            console.log('Bref: Vendor file already exists on bucket. Not uploading again.');
+            this.consoleLog('Vendor file already exists on bucket. Not uploading again.');
             return;
         }
 
-        console.log('Bref: Vendor file not found. Uploading...')
+        this.consoleLog('Vendor file not found. Uploading...')
 
         const readStream = this.fs.createReadStream(zipFile);
         const details = {
@@ -226,7 +226,7 @@ class ServerlessPlugin {
     }
 
     async removeVendorArchives() {
-        console.log('Bref: Removing vendor archives from S3 bucket.');
+        this.consoleLog('Removing vendor archives from S3 bucket.');
 
         this.bucketName = await this.provider.getServerlessDeploymentBucketName();
         this.deploymentPrefix = await this.provider.getDeploymentPrefix();
@@ -237,7 +237,7 @@ class ServerlessPlugin {
         })
 
         if(bucketObjects.length === 0) {
-            console.log('Bref: No vendor archives found.');
+            this.consoleLog('No vendor archives found.');
             return;
         }
 
@@ -254,9 +254,13 @@ class ServerlessPlugin {
             });
         });
 
-        console.log(`Bref: Removing ${details.Delete.Objects.length} vendor archives from Bucket.`);
+        this.consoleLog(`Removing ${details.Delete.Objects.length} vendor archives from Bucket.`);
 
         return await this.provider.request('S3', 'deleteObjects', details);
+    }
+
+    consoleLog(message) {
+        console.log(`Bref: ${this.chalk.yellow(message)}`);
     }
 }
 
