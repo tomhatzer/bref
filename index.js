@@ -71,8 +71,6 @@ class ServerlessPlugin {
             excludes[excludes.length] = 'vendor/**';
         }
 
-        excludes[excludes.length] = this.newVendorZipName;
-
         let iamRoleStatements = this.serverless.service.provider.iamRoleStatements;
         const roleDetails = {
             'Effect': 'Allow',
