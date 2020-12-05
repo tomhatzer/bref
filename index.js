@@ -173,9 +173,6 @@ class ServerlessPlugin {
                     this.fs.createReadStream(this.filePath).on('data', data => hash.update(data)).on('end', () => resolve(hash.digest('hex')));
                 });
             })
-            .then(hash => {
-                return hash;
-            })
             .catch(err => {
                 throw new Error(`Failed to create zip file vendor.zip: ${err.message}`);
             });
@@ -193,21 +190,19 @@ class ServerlessPlugin {
     }
 
     async uploadZipToS3(zipFile) {
-        const bucketObjects = await this.provider.request('S3', 'listObjectsV2', {
-            Bucket: this.bucketName,
-            Prefix: this.deploymentPrefix || ''
-        })
-
         this.consoleLog('Checking vendor file on bucket...');
 
-        const preparedBucketObjects = bucketObjects.Contents.map(object => object.Key);
+        try {
+            const bucketObjects = await this.provider.request('S3', 'headObject', {
+                Bucket: this.bucketName,
+                Key: this.stripSlashes(this.deploymentPrefix + '/vendors/' + this.newVendorZipName)
+            });
 
-        if(preparedBucketObjects.indexOf(this.stripSlashes(this.deploymentPrefix + '/vendors/' + this.newVendorZipName)) >= 0) {
             this.consoleLog('Vendor file already exists on bucket. Not uploading again.');
             return;
+        } catch(e) {
+            this.consoleLog('Vendor file not found. Uploading...');
         }
-
-        this.consoleLog('Vendor file not found. Uploading...')
 
         const readStream = this.fs.createReadStream(zipFile);
         const details = {
