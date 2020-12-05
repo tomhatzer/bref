@@ -40,7 +40,8 @@ class ServerlessPlugin {
         }
 
         this.hooks = {
-            'package:setupProviderConfiguration': this.createVendorZip.bind(this)
+            'package:setupProviderConfiguration': this.createVendorZip.bind(this),
+            'before:remove:remove': this.removeVendorArchives.bind(this)
             //'before:deploy:deploy': this.createVendorZip.bind(this)
         };
     }
@@ -197,6 +198,40 @@ class ServerlessPlugin {
 
     stripSlashes(filePath) {
         return filePath.replace(/^\/+/g, '');
+    }
+
+    async removeVendorArchives() {
+        console.log('Bref: Removing vendor archives from S3 bucket.');
+
+        this.bucketName = await this.provider.getServerlessDeploymentBucketName();
+        this.deploymentPrefix = await this.provider.getDeploymentPrefix();
+
+        const bucketObjects = await this.provider.request('S3', 'listObjectsV2', {
+            Bucket: this.bucketName,
+            Prefix: this.stripSlashes(this.deploymentPrefix + '/vendors/')
+        })
+
+        if(bucketObjects.length === 0) {
+            console.log('Bref: No vendor archives found.');
+            return;
+        }
+
+        let details = {
+            Bucket: this.bucketName,
+            Delete: {
+                Objects: []
+            }
+        };
+
+        bucketObjects.Contents.forEach(content => {
+            details.Delete.Objects.push({
+                Key: content.Key
+            });
+        });
+
+        console.log(`Bref: Removing ${details.Delete.Objects.length} vendor archives from Bucket.`);
+
+        return await this.provider.request('S3', 'deleteObjects', details);
     }
 }
 

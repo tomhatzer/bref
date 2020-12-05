@@ -9,7 +9,7 @@ error_reporting(E_ALL);
 $appRoot = getenv('LAMBDA_TASK_ROOT');
 
 if (getenv('BREF_DOWNLOAD_VENDOR')) {
-    if(! file_exists('/tmp/vendor')) {
+    if(! file_exists('/tmp/vendor') || ! file_exists('/tmp/vendor/autoload.php')) {
         exec(sprintf('/opt/awscli/aws s3 cp %s /tmp/vendor.zip', getenv('BREF_DOWNLOAD_VENDOR')));
 
         exec('unzip /tmp/vendor.zip -d /tmp/vendor');
