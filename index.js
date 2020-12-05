@@ -134,7 +134,7 @@ class ServerlessPlugin {
                 zlib: { level: 9 } // Sets the compression level.
             });
 
-            this.consoleLog(`Creating vendor.zip archive...`);
+            this.consoleLog(`Packaging the Composer vendor directory in ${this.filePath}.`);
 
             archive.pipe(output);
             archive.directory('vendor/', false);
@@ -143,10 +143,6 @@ class ServerlessPlugin {
             output.on('close', () => {
                 this.consoleLog(`Created vendor.zip with ${archive.pointer()} total bytes.`);
                 resolve();
-            });
-
-            output.on('end', () => {
-                this.consoleLog('Archiver data stream has been drained');
             });
 
             archive.on('warning', err => {
@@ -179,22 +175,20 @@ class ServerlessPlugin {
     }
 
     async uploadVendorZip() {
-        this.consoleLog('Fetching serverless bucket name.');
-        this.bucketName = await this.provider.getServerlessDeploymentBucketName();
-        this.consoleLog('Fetching serverless deployment prefix.');
-        this.deploymentPrefix = await this.provider.getDeploymentPrefix();
-
         await this.uploadZipToS3(this.filePath);
 
         this.consoleLog('Vendor separation done!');
     }
 
     async uploadZipToS3(zipFile) {
+        const bucketName = await this.provider.getServerlessDeploymentBucketName();
+        const deploymentPrefix = await this.provider.getDeploymentPrefix();
+
         this.consoleLog('Checking vendor file on bucket...');
 
         try {
-            const bucketObjects = await this.provider.request('S3', 'headObject', {
-                Bucket: this.bucketName,
+            await this.provider.request('S3', 'headObject', {
+                Bucket: bucketName,
                 Key: this.stripSlashes(this.deploymentPrefix + '/vendors/' + this.newVendorZipName)
             });
 
@@ -208,9 +202,9 @@ class ServerlessPlugin {
         const details = {
             ACL: 'private',
             Body: readStream,
-            Bucket: this.bucketName,
+            Bucket: bucketName,
             ContentType: 'application/zip',
-            Key: this.stripSlashes(this.deploymentPrefix + '/vendors/' + this.newVendorZipName),
+            Key: this.stripSlashes(deploymentPrefix + '/vendors/' + this.newVendorZipName),
         };
 
         return await this.provider.request('S3', 'putObject', details);
@@ -223,12 +217,12 @@ class ServerlessPlugin {
     async removeVendorArchives() {
         this.consoleLog('Removing vendor archives from S3 bucket.');
 
-        this.bucketName = await this.provider.getServerlessDeploymentBucketName();
-        this.deploymentPrefix = await this.provider.getDeploymentPrefix();
+        const bucketName = await this.provider.getServerlessDeploymentBucketName();
+        const deploymentPrefix = await this.provider.getDeploymentPrefix();
 
         const bucketObjects = await this.provider.request('S3', 'listObjectsV2', {
-            Bucket: this.bucketName,
-            Prefix: this.stripSlashes(this.deploymentPrefix + '/vendors/')
+            Bucket: bucketName,
+            Prefix: this.stripSlashes(deploymentPrefix + '/vendors/')
         })
 
         if(bucketObjects.length === 0) {
@@ -237,7 +231,7 @@ class ServerlessPlugin {
         }
 
         let details = {
-            Bucket: this.bucketName,
+            Bucket: bucketName,
             Delete: {
                 Objects: []
             }
@@ -249,7 +243,7 @@ class ServerlessPlugin {
             });
         });
 
-        this.consoleLog(`Removing ${details.Delete.Objects.length} vendor archives from Bucket.`);
+        this.consoleLog(`Found ${details.Delete.Objects.length} vendor archives. Removing them from Bucket now.`);
 
         return await this.provider.request('S3', 'deleteObjects', details);
     }
