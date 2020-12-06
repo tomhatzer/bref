@@ -118,9 +118,12 @@ if (getenv('BREF_DOWNLOAD_VENDOR')) {
         }
 
         unlink('/tmp/vendor.zip');
+
+        $updatedStaticLoader = str_replace("__DIR__ . '/../..'", "'/var/task'", file_get_contents('/tmp/vendor/composer/autoload_static.php'));
+        file_put_contents('/tmp/vendor/composer/autoload_static.php', $updatedStaticLoader);
     }
 
-    require('/tmp/vendor/autoload.php');
+    require '/tmp/vendor/autoload.php';
 } elseif (getenv('BREF_AUTOLOAD_PATH')) {
     /** @noinspection PhpIncludeInspection */
     require getenv('BREF_AUTOLOAD_PATH');
