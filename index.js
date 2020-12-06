@@ -71,52 +71,46 @@ class ServerlessPlugin {
             excludes[excludes.length] = 'vendor/**';
         }
 
-        let iamRoleStatements = this.serverless.service.provider.iamRoleStatements;
+        //let iamRoleStatements = this.serverless.service.provider.iamRoleStatements;
         const roleDetails = {
             'Effect': 'Allow',
-            'Action': 's3:GetObject',
+            'Action': [
+                's3:GetObject',
+            ],
             'Resource': [
                 {
-                    "Fn::Join": [
-                        "",
+                    'Fn::Join': [
+                        '',
                         [
-                            "arn:",
+                            'arn:aws:s3:::',
                             {
-                                "Ref": "AWS::Partition"
+                                'Ref': 'ServerlessDeploymentBucket'
                             },
-                            ":s3:::",
-                            {
-                                "Ref": "ServerlessDeploymentBucket"
-                            },
-                            "/vendors/*"
+                            '/',
+                            this.stripSlashes(this.provider.getDeploymentPrefix() + '/vendors/*')
                         ]
                     ]
                 }
             ]
         };
 
-        if(typeof iamRoleStatements !== 'undefined' && iamRoleStatements) {
-            if(iamRoleStatements.indexOf(roleDetails) === -1) {
-                iamRoleStatements[iamRoleStatements.length] = roleDetails;
-            }
-        } else {
-            this.serverless.service.provider.iamRoleStatements = [
-                roleDetails
-            ];
-        }
+        let resources = this.serverless.service.provider.coreCloudFormationTemplate.Resources;
+        resources[resources.length] = {
+            'ServerlessDeploymentBucketLambdaAccessPolicy': roleDetails
+        };
 
         this.consoleLog('Setting environment variables.');
 
         this.serverless.service.provider.environment.BREF_DOWNLOAD_VENDOR = {
-            "Fn::Join": [
-                "",
+            'Fn::Join': [
+                '',
                 [
-                    "s3://",
+                    's3://',
                     {
-                        "Ref": "ServerlessDeploymentBucket"
+                        'Ref': 'ServerlessDeploymentBucket'
                     },
-                    "/vendors/",
-                    this.newVendorZipName
+                    '/',
+                    this.stripSlashes(this.provider.getDeploymentPrefix() + '/vendors/' + this.newVendorZipName)
                 ]
             ]
         };
@@ -187,7 +181,7 @@ class ServerlessPlugin {
         try {
             await this.provider.request('S3', 'headObject', {
                 Bucket: bucketName,
-                Key: this.stripSlashes(this.deploymentPrefix + '/vendors/' + this.newVendorZipName)
+                Key: this.stripSlashes(deploymentPrefix + '/vendors/' + this.newVendorZipName)
             });
 
             this.consoleLog('Vendor file already exists on bucket. Not uploading again.');
