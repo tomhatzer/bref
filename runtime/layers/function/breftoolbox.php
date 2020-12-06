@@ -21,6 +21,8 @@ use function ksort;
 use function mkdir;
 use function preg_match;
 use function rawurlencode;
+use function rtrim;
+use function sprintf;
 use function str_replace;
 use function substr;
 use function time;
@@ -49,9 +51,15 @@ class BrefToolBox {
      */
     public static function downloadAndConfigureVendor()
     {
-        self::downloadVendorArchive(getenv('BREF_DOWNLOAD_VENDOR'), self::DOWNLOAD_FILE_PATH);
+        self::downloadVendorArchive(
+            getenv('BREF_DOWNLOAD_VENDOR'),
+            self::DOWNLOAD_FILE_PATH
+        );
 
-        $unzipped = self::unzipVendorArchive(self::DOWNLOAD_FILE_PATH, self::EXTRACTION_PATH);
+        $unzipped = self::unzipVendorArchive(
+            self::DOWNLOAD_FILE_PATH,
+            self::EXTRACTION_PATH
+        );
 
         if(! $unzipped) {
             throw new Exception('Unable to unzip vendor archive.');
@@ -76,7 +84,14 @@ class BrefToolBox {
         $filePath = '/' . $matches[2];
         $region = getenv('AWS_REGION');
 
-        $url = self::AWS_S3_PresignDownload(getenv('AWS_ACCESS_KEY_ID'), getenv('AWS_SECRET_ACCESS_KEY'), getenv('AWS_SESSION_TOKEN'), $bucket, $region, $filePath);
+        $url = self::AWS_S3_PresignDownload(
+            getenv('AWS_ACCESS_KEY_ID'),
+            getenv('AWS_SECRET_ACCESS_KEY'),
+            getenv('AWS_SESSION_TOKEN'),
+            $bucket,
+            $region,
+            $filePath
+        );
 
         if(file_exists($downloadPath)) {
             unlink($downloadPath);
@@ -110,7 +125,15 @@ class BrefToolBox {
      * @param int $expires
      * @return string
      */
-    private static function AWS_S3_PresignDownload($AWSAccessKeyId, $AWSSecretAccessKey, $AWSSessionToken, $BucketName, $AWSRegion, $canonical_uri, $expires = 86400): string
+    private static function AWS_S3_PresignDownload(
+        $AWSAccessKeyId,
+        $AWSSecretAccessKey,
+        $AWSSessionToken,
+        $BucketName,
+        $AWSRegion,
+        $canonical_uri,
+        $expires = 86400
+    ): string
     {
         // Creates a signed download link for an AWS S3 file
         // Based on https://gist.github.com/kelvinmo/d78be66c4f36415a6b80
@@ -156,7 +179,14 @@ class BrefToolBox {
 
         $canonical_request = "GET\n" . $encoded_uri . "\n" . $query_string . "\n" . $header_string . "\n" . $signed_headers_string . "\nUNSIGNED-PAYLOAD";
         $string_to_sign = $algorithm . "\n" . $time_text . "\n" . $scope . "\n" . hash('sha256', $canonical_request, false);
-        $signing_key = hash_hmac('sha256', 'aws4_request', hash_hmac('sha256', 's3', hash_hmac('sha256', $AWSRegion, hash_hmac('sha256', $date_text, 'AWS4' . $AWSSecretAccessKey, true), true), true), true);
+        $signing_key = hash_hmac('sha256', 'aws4_request',
+            hash_hmac('sha256', 's3',
+                hash_hmac('sha256', $AWSRegion,
+                    hash_hmac('sha256', $date_text, 'AWS4' . $AWSSecretAccessKey, true),
+                    true),
+                true),
+            true
+        );
         $signature = hash_hmac('sha256', $string_to_sign, $signing_key);
 
         return 'https://' . $hostname . $encoded_uri . '?' . $query_string . '&X-Amz-Signature=' . $signature;
